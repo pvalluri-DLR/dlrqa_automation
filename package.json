@@ -1,0 +1,19 @@
+{
+  "name": "playwright-framework",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "ts-node": "latest",
+    "typescript": "latest"
+  },
+  "dependencies": {
+    "docx": "latest",
+    "exceljs": "^4.4.0",
+    "fs-extra": "latest",
+    "properties": "^1.2.1"
+  }
+}
