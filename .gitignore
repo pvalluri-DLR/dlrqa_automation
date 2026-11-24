@@ -8,7 +8,7 @@ blob-report/
 playwright/.cache/
 
 # Generated reports
-reports/
+DLR_Reports/
 
 # TypeScript build output
 dist/

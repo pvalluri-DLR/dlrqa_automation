@@ -237,8 +237,14 @@ function createSummaryHtml(entries: Array<{ result: WordTestResult; testName: st
 
 export default class WordReportReporter implements Reporter {
   private results: Array<{ testId: string; result: WordTestResult; sourceFile: string }> = [];
+  private pendingResults: Promise<void>[] = [];
+  private readonly runReportRoot = path.join('DLR_Reports', runFolderName());
 
-  async onTestEnd(test: TestCase, result: TestResult): Promise<void> {
+  onTestEnd(test: TestCase, result: TestResult): void {
+    this.pendingResults.push(this.collectResult(test, result));
+  }
+
+  private async collectResult(test: TestCase, result: TestResult): Promise<void> {
     const steps: WordStepResult[] = result.attachments
       .filter((attachment) => attachment.contentType === 'application/json' && attachment.name.startsWith('word-report-step-'))
       .flatMap((attachment) => {
@@ -290,6 +296,7 @@ export default class WordReportReporter implements Reporter {
   }
 
   async onEnd(_result: FullResult): Promise<void> {
+    await Promise.all(this.pendingResults);
     const reportUtil = new WordReportUtil();
     const latestByTest = new Map<string, (typeof this.results)[number]>();
     for (const entry of this.results) latestByTest.set(entry.testId, entry);
@@ -298,7 +305,7 @@ export default class WordReportReporter implements Reporter {
 
     for (const { result, sourceFile } of finalResults) {
       const relativeSourceFile = path.relative(process.cwd(), sourceFile);
-      const outputDirectory = path.join('reports', path.dirname(relativeSourceFile));
+      const outputDirectory = path.join(this.runReportRoot, path.dirname(relativeSourceFile));
       const testName = result.title.split(' > ').pop()?.trim() || path.basename(sourceFile, path.extname(sourceFile));
       const safeTestName = testName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]+$/g, '');
       const basePath = path.resolve(outputDirectory, safeTestName).toLowerCase();
@@ -309,7 +316,7 @@ export default class WordReportReporter implements Reporter {
     const summaryEntries: Array<{ result: WordTestResult; testName: string; reportPath: string; sourceFile: string }> = [];
     for (const { result, sourceFile } of finalResults) {
       const relativeSourceFile = path.relative(process.cwd(), sourceFile);
-      const outputDirectory = path.join('reports', path.dirname(relativeSourceFile));
+      const outputDirectory = path.join(this.runReportRoot, path.dirname(relativeSourceFile));
       const testName = result.title.split(' > ').pop()?.trim() || path.basename(sourceFile, path.extname(sourceFile));
       const safeTestName = testName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/[. ]+$/g, '');
       const basePath = path.resolve(outputDirectory, safeTestName).toLowerCase();
@@ -326,10 +333,18 @@ export default class WordReportReporter implements Reporter {
       const htmlReportPath = `${reportBasePath}.html`;
       await fs.writeFile(htmlReportPath, createHtmlReport(result, testName, sourceFile), 'utf8');
       await reportUtil.generateReport([result], `${reportBasePath}.docx`);
-      summaryEntries.push({ result, testName, reportPath: path.relative('reports', htmlReportPath), sourceFile });
+      summaryEntries.push({ result, testName, reportPath: path.relative(this.runReportRoot, htmlReportPath), sourceFile });
     }
 
-    await fs.mkdir('reports', { recursive: true });
-    await fs.writeFile('reports/SummayReport.html', createSummaryHtml(summaryEntries), 'utf8');
+    await fs.mkdir(this.runReportRoot, { recursive: true });
+    await fs.writeFile(path.join(this.runReportRoot, 'SummayReport.html'), createSummaryHtml(summaryEntries), 'utf8');
   }
+}
+
+function runFolderName(): string {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const date = `${pad(now.getMonth() + 1)}${pad(now.getDate())}${now.getFullYear()}`;
+  const time = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `Run_${date}_${time}`;
 }

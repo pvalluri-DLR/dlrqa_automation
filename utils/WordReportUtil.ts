@@ -51,7 +51,7 @@ export interface WordStepResult {
 }
 
 export class WordReportUtil {
-	async generateReport(results: WordTestResult[], outputPath = 'reports/ExecutionReport.docx'): Promise<void> {
+	async generateReport(results: WordTestResult[], outputPath = 'DLR_Reports/ExecutionReport.docx'): Promise<void> {
 		const firstResult = results[0];
 		const testCaseNames = [...new Set(results.map((result) =>
 			path.basename(result.title.split(' > ')[0]).replace(/\.(?:spec|test)\.[^.]+$|\.[^.]+$/i, ''),

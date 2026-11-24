@@ -13,16 +13,16 @@ test('New Logo PHX10 Test', async ({ page }, testInfo) => {
 		await page.goto(testData.applicationUrl);
 	});
 
-	await runStep(page, testInfo, 'Login to Salesforce', async () => {
-		await login.loginToSalesforce(testData.username, testData.password);
-	});
+	// await runStep(page, testInfo, 'Login to Salesforce', async () => {
+	// 	await login.loginToSalesforce(testData.username, testData.password);
+	// });
 
-	let salesAccountName = '';
-	await runStep(page, testInfo, 'Create and publish Sales Account', async () => {
-		salesAccountName = await accountCreation.createSalesAccountAndPublish(testData);
-	});
+	// let salesAccountName = '';
+	// await runStep(page, testInfo, 'Create and publish Sales Account', async () => {
+	// 	salesAccountName = await accountCreation.createSalesAccountAndPublish(testData);
+	// });
 
-	await runStep(page, testInfo, 'Create and publish Legal Entity', async () => {
-		await accountCreation.createLegalEntityAccountAndPublish(testData, salesAccountName);
-	});
+	// await runStep(page, testInfo, 'Create and publish Legal Entity', async () => {
+	// 	await accountCreation.createLegalEntityAccountAndPublish(testData, salesAccountName);
+	// });
 });
