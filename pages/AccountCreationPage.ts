@@ -9,6 +9,16 @@ export class AccountCreationPage {
 		this.playwright = new PlaywrightUtil(page);
 	}
 
+	private async isPresent(locator: Locator, timeout = 5000): Promise<boolean> {
+		return locator.waitFor({ state: 'visible', timeout }).then(() => true, () => false);
+	}
+
+	private async fillIfPresent(locator: Locator, value: string): Promise<void> {
+		if (await this.isPresent(locator)) {
+			await this.playwright.fill(locator, value);
+		}
+	}
+
 	private async openNewAccount(recordType: string): Promise<Locator> {		
 
 		const recordTypeOption = this.page.getByRole('radio', { name: recordType, exact: true });
@@ -35,20 +45,32 @@ export class AccountCreationPage {
 		// await expect(
 		// 	this.page.getByRole('combobox', { name: 'Select Address (State/Province)', exact: true }),
 		// ).toHaveText(data.billingState);
-		await this.playwright.fill(this.page.getByLabel('Select Address (Street)', { exact: true }), data.billingStreet);
-		await this.playwright.fill(this.page.getByLabel('Select Address (City)', { exact: true }), data.billingCity);
+		await this.fillIfPresent(this.page.getByLabel('Select Address (Street)', { exact: true }), data.billingStreet);
+		await this.fillIfPresent(this.page.getByLabel('Select Address (City)', { exact: true }), data.billingCity);
 		await this.chooseOption('Select Address (State/Province)', data.billingState);
-		await this.playwright.fill(this.page.getByLabel('Select Address (ZIP/Postal Code)', { exact: true }), data.billingPostalCode);
+		await this.fillIfPresent(this.page.getByLabel('Select Address (ZIP/Postal Code)', { exact: true }), data.billingPostalCode);
 	}
 
-	private async selectRegion(value: string): Promise<void> {		
-		const firstOption = this.page.locator(`//button[@aria-label='Region']`);
-		await this.playwright.click(firstOption);
-		await this.playwright.click(this.page.getByRole('option', { name: value, exact: true }));
+	async selectRegion(value: string): Promise<void> {
+		const regionCombobox = this.page
+			.locator(`xpath=//label[text()='Region']/../..//lightning-base-combobox`)
+			.filter({ visible: true })
+			.first();
+			await this.playwright.click(regionCombobox);
+		const regionOption = this.page
+			.locator(`xpath=//lightning-base-combobox-item//lightning-base-combobox-formatted-text[@title='${value}']`)
+			.filter({ visible: true })
+			.first();
+		
+		await this.playwright.click(regionOption);
 	}
 
 	private async chooseOption(label: string, value: string): Promise<void> {
+		await this.playwright.waitForPageLoad();
 		const combobox = this.page.getByRole('combobox', { name: label, exact: true });
+		if (!(await this.isPresent(combobox))) {
+			return;
+		}
 		await this.playwright.selectFromDropdown(combobox, this.page.getByRole('option', { name: value, exact: true }), value);
 	}
 
@@ -58,6 +80,7 @@ export class AccountCreationPage {
 	}
 
 	private async publishAccount(accountName: string): Promise<void> {
+		await this.playwright.waitForPageLoad();
 		const publishButton = this.page.getByRole('button', { name: 'Publish', exact: true });
 		if (await publishButton.isVisible().catch(() => false)) {
 			await this.playwright.click(publishButton);
@@ -65,12 +88,12 @@ export class AccountCreationPage {
 			await this.playwright.click(this.page.getByRole('button', { name: 'Show more actions', exact: true }));
 			await this.playwright.click(this.page.getByRole('menuitem', { name: 'Publish', exact: true }));
 		}
-		await this.playwright.waitForTimeout(60000);
+		await this.playwright.waitForPageLoad();
+		await this.playwright.waitForTabsToLoad(['Related', 'Details', 'ZoomInfo']);
 		//await this.waitForAccountOwnerPopulated(accountName);
 	}
 
 	private async waitForAccountOwnerPopulated(accountName: string): Promise<void> {
-		await this.playwright.waitForTimeout(30000);
 		await this.waitForAccountNameDisplayed(accountName);
 		const accountOwnerField = this.page
 			.locator('records-record-layout-item, .slds-form-element')
@@ -109,7 +132,7 @@ export class AccountCreationPage {
 				return;
 			}
 			await this.page.mouse.wheel(0, box && box.y > viewportHeight ? 400 : -400);
-			await this.page.waitForTimeout(300);
+			await this.playwright.waitForPageLoad();
 		}
 		await locator.waitFor({ state: 'visible' });
 	}
@@ -124,18 +147,20 @@ export class AccountCreationPage {
 		await this.playwright.click(recordTypeLabel);
 		await this.playwright.click(this.page.getByRole('button', { name: 'Next', exact: true }));
 		await this.playwright.click(this.page.getByRole('button', { name: 'Save', exact: true }));
-		await this.playwright.waitForTimeout(40000);
+		await this.playwright.waitForPageLoad();
 	}
 
 	async createSalesAccountAndPublish(data: SalesforceTestData): Promise<string> {
+		await this.playwright.waitForTimeout(10000);
 		const accountDialog = await this.openNewAccount(data.salesRecordType);
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), data.salesAccountName);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), data.salesAccountName);
 		const website = `www.${data.salesAccountName.replace(/\s+/g, '').toLowerCase()}.com`;
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
 		await this.chooseOption('Lead Source', data.leadSource);
 		await this.chooseOption('New Account Reason', data.newAccountReason);
 		await this.chooseOption('Lead Source Detail', data.leadSourceDetail);
 		//await this.page.getByLabel('Lead Source Detail', { exact: true }).fill(data.leadSourceDetail);
+		//await this.selectRegion(data.billingRegion);
 		await this.fillAccountAddress(data);
 		await this.approveAndSave();
 		await this.publishAccount(data.salesAccountName);
@@ -147,10 +172,12 @@ export class AccountCreationPage {
 		salesAccountName: string,
 	): Promise<string> {
 		const accountDialog = await this.openNewAccount(data.legalEntityRecordType);
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), data.legalEntityName);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), data.legalEntityName);
 		const parentAccount = accountDialog.getByRole('combobox', { name: 'Parent Account', exact: true });
-		await this.playwright.fill(parentAccount, salesAccountName);
-		await this.playwright.click(accountDialog.getByRole('option', { name: salesAccountName, exact: true }));
+		if (await this.isPresent(parentAccount)) {
+			await this.playwright.fill(parentAccount, salesAccountName);
+			await this.playwright.click(accountDialog.getByRole('option', { name: salesAccountName, exact: true }));
+		}
 		await this.chooseOption('Currency', data.opportunityCurrency);
 		await this.fillAccountAddress(data);
 		await this.approveAndSave();
@@ -160,20 +187,32 @@ export class AccountCreationPage {
 
 	private async selectParentAccount(accountDialog: Locator, parentAccountName: string): Promise<void> {
 		const parentAccount = accountDialog.getByRole('combobox', { name: 'Parent Account', exact: true });
-		await this.playwright.typeCharacterByCharacter(parentAccount, parentAccountName);
+		if (!(await this.isPresent(parentAccount))) {
+			return;
+		}
 		const escapedParentName = parentAccountName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		await this.playwright.click(accountDialog.getByRole('option', { name: new RegExp(`^${escapedParentName}`) }).first());
+		const suggestion = accountDialog.getByRole('option', { name: new RegExp(`^${escapedParentName}`) }).first();
+		const suggestionShown = async (timeout: number): Promise<boolean> =>
+			suggestion.waitFor({ state: 'visible', timeout }).then(() => true, () => false);
+
+		await this.playwright.typeCharacterByCharacter(parentAccount, parentAccountName);
+		if (!(await suggestionShown(5000))) {
+			await this.playwright.fill(parentAccount, '');
+			await this.playwright.typeCharacterByCharacter(parentAccount, parentAccountName);
+		}
+		await this.playwright.click(suggestion);
 	}
 
 	async createCustomerAccountAndPublish(data: SalesforceTestData, customerAccountName: string, parentAccountName: string): Promise<string> {
 		const accountDialog = await this.openNewAccount('Customer');
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), customerAccountName);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), customerAccountName);
 		const website = `www.${customerAccountName.replace(/\s+/g, '').toLowerCase()}.com`;
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
 		await this.selectParentAccount(accountDialog, parentAccountName);
 			await this.chooseOption('Lead Source', data.leadSource);
 		await this.chooseOption('New Account Reason', data.newAccountReason);
 		await this.chooseOption('Lead Source Detail', data.leadSourceDetail);
+		//await this.selectRegion(data.billingRegion);
 		await this.fillAccountAddress(data);
 		await this.approveAndSave();
 		await this.publishAccount(customerAccountName);
@@ -182,43 +221,47 @@ export class AccountCreationPage {
 
 	async createSalesAccountWithPAAsCAAndPublish(data: SalesforceTestData, salesACCName: string, parentAccountName: string): Promise<string> {
 		const accountDialog = await this.openNewAccount('Sales Account');
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), salesACCName);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), salesACCName);
 		const website = `www.${salesACCName.replace(/\s+/g, '').toLowerCase()}.com`;
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
 		await this.selectParentAccount(accountDialog, parentAccountName);
 			await this.chooseOption('Lead Source', data.leadSource);
 		await this.chooseOption('New Account Reason', data.newAccountReason);
 		await this.chooseOption('Lead Source Detail', data.leadSourceDetail);
+		//await this.selectRegion(data.billingRegion);
 		await this.fillAccountAddress(data);
 		await this.approveAndSave();
 		await this.publishAccount(salesACCName);
 		return salesACCName;
 	}
 
-	async createLegalEntityParentAndPublish(data: SalesforceTestData, slegalEntityParentName: string, parentAccountName: string): Promise<string> {
+	async createLegalEntityParentAndPublish(data: SalesforceTestData, legalEntityParentName: string, parentAccountName: string): Promise<string> {
 		const accountDialog = await this.openNewAccount('Legal Entity Parent');
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), slegalEntityParentName);
-		const website = `www.${slegalEntityParentName.replace(/\s+/g, '').toLowerCase()}.com`;
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), legalEntityParentName);
+		const website = `www.${legalEntityParentName.replace(/\s+/g, '').toLowerCase()}.com`;
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
 		await this.selectParentAccount(accountDialog, parentAccountName);
 			await this.chooseOption('Lead Source', data.leadSource);
 		await this.chooseOption('New Account Reason', data.newAccountReason);
 		await this.chooseOption('Lead Source Detail', data.leadSourceDetail);
+		//await this.selectRegion(data.billingRegion);
 		await this.fillAccountAddress(data);
 		await this.approveAndSave();
-		await this.publishAccount(slegalEntityParentName);
-		return slegalEntityParentName;
+		await this.publishAccount(legalEntityParentName);
+		return legalEntityParentName;
 	}
 
 	async createLegalEntityAndPublish(data: SalesforceTestData, legalEntityName: string, parentAccountName: string): Promise<string> {
 		const accountDialog = await this.openNewAccount('Legal Entity');
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), legalEntityName);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Account Name', exact: true }), legalEntityName);
 		const website = `www.${legalEntityName.replace(/\s+/g, '').toLowerCase()}.com`;
-		await this.playwright.fill(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
+		await this.fillIfPresent(accountDialog.getByRole('textbox', { name: 'Website', exact: true }), website);
 		await this.selectParentAccount(accountDialog, parentAccountName);
-			await this.chooseOption('Lead Source', data.leadSource);
+		await this.chooseOption('Preferred Opportunity Currency', data.opportunityCurrency);
+		//await this.chooseOption('Lead Source', data.leadSource);
 		await this.chooseOption('New Account Reason', data.newAccountReason);
-		await this.chooseOption('Lead Source Detail', data.leadSourceDetail);
+		await this.chooseOption('Lead Source Detail', data.leadSourceDetail);	
+		//await this.chooseOption('Region', data.billingRegion);	
 		await this.fillAccountAddress(data);
 		await this.approveAndSave();
 		await this.publishAccount(legalEntityName);

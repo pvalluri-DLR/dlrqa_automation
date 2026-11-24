@@ -16,12 +16,13 @@ export class LoginPage {
 		try {
 			await this.playwright.fill('#username', username);
 			await this.playwright.click('#Login');
-			await this.playwright.waitForTimeout(2000);
+			await this.playwright.waitForTimeout(10000);
+			//await this.playwright.waitForPageLoad();
 			await this.playwright.fill('#password', password);
 			await this.playwright.click('#Login');
-			await this.playwright.fill('#tc',"RPEQNMIEKX");
+			await this.playwright.fill('#tc',"V8X4GCD3SN");
 			await this.playwright.click('#save');
-			await this.playwright.waitForTimeout(10000);
+			await this.playwright.waitForPageLoad();
 			
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -32,5 +33,11 @@ export class LoginPage {
 
 	async login(username: string, password: string): Promise<void> {
 		await this.loginToSalesforce(username, password);
+	}
+
+	async logoutFromSalesforce(): Promise<void> {
+		await this.playwright.click(this.page.locator("xpath=//button[contains(@class,'oneUserProfileCardTrigger')]").filter({ visible: true }).first());
+		await this.playwright.click(this.page.locator("xpath=//a[normalize-space(.)='Logout']").filter({ visible: true }).first());
+		await this.page.waitForLoadState('load');
 	}
 }

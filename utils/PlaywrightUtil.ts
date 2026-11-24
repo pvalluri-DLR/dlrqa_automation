@@ -1,6 +1,8 @@
 import type { Locator, Page } from '@playwright/test';
 import { runStepAction } from './StepReportUtil';
 
+const MAX_HARD_WAIT_MS = 5000;
+
 export class PlaywrightUtil {
 	constructor(private readonly page: Page) {}
 
@@ -40,10 +42,10 @@ export class PlaywrightUtil {
 		});
 	}
 
-	async typeCharacterByCharacter(selector: string | Locator, value: string): Promise<void> {
+	async typeCharacterByCharacter(selector: string | Locator, value: string, delay = 1000): Promise<void> {
 		const field = this.describeField(selector);
 		await runStepAction(this.page, `Entered value - "${this.displayValue(field, value)}" in the "${field}"`, async () => {
-			await this.getLocator(selector).pressSequentially(value);
+			await this.getLocator(selector).pressSequentially(value, { delay });
 		});
 	}
 
@@ -64,6 +66,7 @@ export class PlaywrightUtil {
 		const field = this.describeField(dropdown);
 		await runStepAction(this.page, `Selected value - "${value}" from the dropdown "${field}"`, async () => {
 			await this.getLocator(dropdown).click();
+			await this.waitForPageLoad();
 			await this.getLocator(option).click();
 		});
 	}
@@ -80,21 +83,63 @@ export class PlaywrightUtil {
 		});
 	}
 
-	async waitForVisible(selector: string | Locator): Promise<void> {
+	async waitForVisible(selector: string | Locator, timeout?: number): Promise<void> {
 		await runStepAction(this.page, `Wait for "${this.describeField(selector)}" to be visible`, async () => {
-			await this.getLocator(selector).waitFor({ state: 'visible' });
+			await this.getLocator(selector).waitFor({ state: 'visible', timeout });
 		});
 	}
 
 	async waitForPageLoad(): Promise<void> {
 		await runStepAction(this.page, 'Wait for page to load', async () => {
-			await this.page.waitForLoadState('load');
+			const checkIntervalMs = 1000;
+			const maxChecks = 60;
+			for (let check = 1; check <= maxChecks; check++) {
+				// Navigations destroy the execution context mid-poll; treat that as "not ready yet" instead of failing.
+				const isReady = await this.page
+					.evaluate(() => document.readyState === 'complete')
+					.catch(() => false);
+				const spinnersVisible = await this.page
+					.locator('.slds-spinner_container')
+					.filter({ visible: true })
+					.count()
+					.catch(() => 1);
+				const logoVisible = await this.page
+					.locator('.slds-global-header__logo, .slds-icon-waffle_container')
+					.filter({ visible: true })
+					.count()
+					.catch(() => 0);
+				if (isReady && spinnersVisible === 0 && logoVisible > 0) {
+					return;
+				}
+				if (check < maxChecks) {
+					await this.page.waitForLoadState('domcontentloaded', { timeout: checkIntervalMs }).catch(() => undefined);
+					// Plain timer keeps the 60s budget even if the page has closed.
+					await new Promise((resolve) => setTimeout(resolve, checkIntervalMs));
+				}
+			}
+			throw new Error('Page did not finish loading within 60 seconds');
+		});
+	}
+
+	async waitForTabsToLoad(tabNames: string[], timeout = 60000): Promise<void> {
+		await runStepAction(this.page, `Wait for tabs to load: ${tabNames.join(', ')}`, async () => {
+			for (const tabName of tabNames) {
+				await this.page
+					.getByRole('tab', { name: tabName, exact: true })
+					.filter({ visible: true })
+					.first()
+					.waitFor({ state: 'visible', timeout });
+			}
 		});
 	}
 
 	async waitForTimeout(milliseconds: number): Promise<void> {
-		await runStepAction(this.page, `Wait ${milliseconds} ms`, async () => {
-			await this.page.waitForTimeout(milliseconds);
+		// Hard waits are capped so accumulated fixed waits cannot exhaust the test timeout.
+		const cappedMs = Math.min(milliseconds, MAX_HARD_WAIT_MS);
+		await runStepAction(this.page, `Wait ${cappedMs} ms`, async () => {
+			await this.page.waitForTimeout(cappedMs).catch(() => {
+				console.warn(`Skipped fixed wait of ${cappedMs} ms due to an error`);
+			});
 		});
 	}
 }

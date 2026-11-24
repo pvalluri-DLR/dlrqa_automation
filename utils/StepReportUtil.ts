@@ -7,6 +7,7 @@ interface StepAttachment {
 	duration: number;
 	applicationUrl: string;
 	actions: StepActionAttachment[];
+	details?: Record<string, string>;
 	error?: string;
 	screenshot?: string;
 }
@@ -19,6 +20,14 @@ export interface StepActionAttachment {
 }
 
 const actionLogsByPage = new WeakMap<Page, StepActionAttachment[]>();
+const stepDetailsByPage = new WeakMap<Page, Record<string, string>>();
+
+export function recordStepDetail(page: Page, label: string, value: string): void {
+	const details = stepDetailsByPage.get(page);
+	if (details) {
+		details[label] = value;
+	}
+}
 
 export async function runStepAction(page: Page, action: string, execute: () => Promise<void>): Promise<void> {
 	const actionLog: StepActionAttachment = {
@@ -47,6 +56,8 @@ export async function runStep(
 	const timestamp = new Date(startedAt).toISOString();
 	const actions: StepActionAttachment[] = [];
 	actionLogsByPage.set(page, actions);
+	const details: Record<string, string> = {};
+	stepDetailsByPage.set(page, details);
 	let status = 'passed';
 	let error: string | undefined;
 
@@ -55,11 +66,14 @@ export async function runStep(
 	} catch (caughtError) {
 		status = 'failed';
 		error = caughtError instanceof Error ? caughtError.message : String(caughtError);
+		const failedAction = actions.filter((action) => action.status === 'failed').pop();
 		console.error([
 			'',
 			'========== TEST STEP FAILED ==========',
 			`Test: ${testInfo.titlePath.join(' > ')}`,
 			`Step: ${stepName}`,
+			`Failed action: ${failedAction?.action ?? 'Unknown'}`,
+			`Application URL: ${page.isClosed() ? 'Unavailable' : page.url()}`,
 			`File: ${testInfo.file}`,
 			`Error: ${error}`,
 			'======================================',
@@ -103,6 +117,7 @@ export async function runStep(
 			duration,
 			applicationUrl,
 			actions,
+			details,
 			error,
 			screenshot: screenshot?.toString('base64'),
 		};
@@ -111,5 +126,6 @@ export async function runStep(
 			contentType: 'application/json',
 		});
 		actionLogsByPage.delete(page);
+		stepDetailsByPage.delete(page);
 	}
 }

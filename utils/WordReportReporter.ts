@@ -35,7 +35,7 @@ function createHtmlReport(result: WordTestResult, testName: string, sourceFile: 
       return `
       <tr class="step-row" data-status="${escapeHtml(step.status.toLowerCase())}" data-search="${escapeHtml(`${step.stepName} ${step.status} ${step.error ?? ''} ${actionSearchText}`.toLowerCase())}">
         <td>${index + 1}</td>
-        <td><strong>${escapeHtml(step.stepName)}</strong>${step.error ? `<pre class="error">${escapeHtml(step.error)}</pre>` : ''}${actionLogs}</td>
+        <td><strong>${escapeHtml(step.stepName)}</strong>${step.error ? `<pre class="error">${escapeHtml(step.error)}</pre>` : ''}${actionLogs}${Object.entries(step.details ?? {}).map(([label, value]) => `<p class="step-detail"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`).join('')}</td>
         <td><span class="badge ${escapeHtml(step.status.toLowerCase())}">${escapeHtml(step.status.toUpperCase())}</span></td>
         <td>${escapeHtml(step.timestamp)}</td>
         <td>${step.screenshot ? `<details><summary>View screenshot</summary><img src="data:image/png;base64,${step.screenshot.toString('base64')}" alt="Screenshot for ${escapeHtml(step.stepName)}"></details>` : 'Screenshot unavailable'}</td>

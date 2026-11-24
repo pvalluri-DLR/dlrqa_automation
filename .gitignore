@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Playwright generated output
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# Generated reports
+reports/
+
+# TypeScript build output
+dist/
+*.tsbuildinfo
+
+# Logs and coverage
+*.log
+coverage/
+
+# Local environment and secrets
+.env
+.env.*
+
+# OS / editor files
+.DS_Store
+Thumbs.db

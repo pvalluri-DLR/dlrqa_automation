@@ -27,6 +27,11 @@ export interface SalesforceTestData {
 	legalEntityName: string;
 	legalEntityRecordType: string;
 	opportunityCurrency: string;
+	contactFirstName: string;
+	contactLastName: string;
+	contactEmail: string;
+	contactPhone: string;
+	suite: string;
 }
 
 const requiredColumns = [
@@ -46,6 +51,10 @@ const requiredColumns = [
 	'legalentityname',
 	'legalentityrecordtype',
 	'opportunitycurrency',
+	'contactfirstname',
+	'contactlastname',
+	'contactemail',
+	'contactphone',
 ];
 
 export async function readTestData(testName: string): Promise<SalesforceTestData> {
@@ -114,6 +123,11 @@ export async function readTestData(testName: string): Promise<SalesforceTestData
 			legalEntityName: getExcelValue('legalentityname'),
 			legalEntityRecordType: getExcelValue('legalentityrecordtype'),
 			opportunityCurrency: getExcelValue('opportunitycurrency'),
+			contactFirstName: getExcelValue('contactfirstname'),
+			contactLastName: getExcelValue('contactlastname'),
+			contactEmail: getExcelValue('contactemail'),
+			contactPhone: getExcelValue('contactphone'),
+			suite: columns.has('suite') ? getExcelValue('suite') : '',
 		};
 		const missingConfiguration = ['applicationUrl', 'username', 'password']
 			.filter((field) => !testData[field as keyof SalesforceTestData]);

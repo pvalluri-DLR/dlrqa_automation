@@ -45,6 +45,7 @@ export interface WordStepResult {
 	duration: number;
 	applicationUrl?: string;
 	actions?: StepActionAttachment[];
+	details?: Record<string, string>;
 	screenshot?: Buffer;
 	error?: string;
 }
@@ -114,7 +115,7 @@ export class WordReportUtil {
 						rows: [
 							reportFieldRow('Status', step.status.toUpperCase(), stepStatusFill),
 							reportFieldRow('Timestamp', step.timestamp),
-							...(step.error ? [reportFieldRow('Error', step.error, 'FCE4D6')] : []),
+							...Object.entries(step.details ?? {}).map(([label, value]) => reportFieldRow(label, value, 'E2F0D9')),							...(step.error ? [reportFieldRow('Error', step.error, 'FCE4D6')] : []),
 							new TableRow({
 								children: [new TableCell({
 									children: [step.screenshot
