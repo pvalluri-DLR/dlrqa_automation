@@ -20,7 +20,7 @@ export class LoginPage {
 			//await this.playwright.waitForPageLoad();
 			await this.playwright.fill('#password', password);
 			await this.playwright.click('#Login');
-			await this.playwright.fill('#tc',"V8X4GCD3SN");
+			await this.playwright.fill('#tc',"6D88UTFER1");
 			await this.playwright.click('#save');
 			await this.playwright.waitForPageLoad();
 			

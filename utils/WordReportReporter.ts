@@ -1,8 +1,67 @@
-import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
+import type { FullConfig, FullResult, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import * as path from 'path';
 import { WordReportUtil, WordStepResult, WordTestResult } from './WordReportUtil';
 import { readTestData } from './ExcelTestDataUtil';
+
+interface TransactionId {
+  label: string;
+  value: string;
+}
+
+interface TestReportLinks {
+  videoHref?: string;
+  traceHref?: string;
+  transactionIds: TransactionId[];
+}
+
+interface SummaryEntry {
+  result: WordTestResult;
+  testName: string;
+  reportPath: string;
+  sourceFile: string;
+  links: TestReportLinks;
+}
+
+const SALESFORCE_RECORD_URL = /\/r\/([A-Za-z0-9_]+)\/([a-zA-Z0-9]{15,18})\//;
+const TRANSACTION_LABEL = /\b(id|number|transaction|quote|opportunity|order)\b/i;
+
+function extractTransactionIds(steps: WordStepResult[]): TransactionId[] {
+  const found = new Map<string, TransactionId>();
+  for (const step of steps) {
+    for (const [label, value] of Object.entries(step.details ?? {})) {
+      if (TRANSACTION_LABEL.test(label) && value.trim()) found.set(`${label}|${value}`, { label, value });
+    }
+    const match = step.applicationUrl?.match(SALESFORCE_RECORD_URL);
+    if (match) found.set(`sf|${match[2]}`, { label: `Salesforce ${match[1]} ID`, value: match[2] });
+  }
+  return [...found.values()];
+}
+
+function relativeHref(fromDirectory: string, target: string): string {
+  return path.relative(fromDirectory, target).split(path.sep).map(encodeURIComponent).join('/');
+}
+
+function linksCell(links: TestReportLinks): string {
+  const parts = [
+    links.videoHref ? `<a href="${escapeHtml(links.videoHref)}">Video</a>` : '',
+    links.traceHref ? `<a href="${escapeHtml(links.traceHref)}">Trace</a>` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : '—';
+}
+
+function transactionIdsCell(ids: TransactionId[]): string {
+  return ids.length
+    ? ids.map((id) => `<div><strong>${escapeHtml(id.label)}:</strong> ${escapeHtml(id.value)}</div>`).join('')
+    : '—';
+}
+
+const BUILT_IN_THEME_MARKER = '<!-- htmlReports-theme -->';
+const BUILT_IN_THEME_CSS = `
+  :root { font-family: "Segoe UI", sans-serif; }
+  body { background: #f2f5f6; }
+`;
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -14,7 +73,13 @@ function escapeHtml(value: string): string {
   })[character] ?? character);
 }
 
-function createHtmlReport(result: WordTestResult, testName: string, sourceFile: string): string {
+function createHtmlReport(
+  result: WordTestResult,
+  testName: string,
+  sourceFile: string,
+  links: TestReportLinks,
+  environment: Record<string, string>,
+): string {
   const status = result.status.toUpperCase();
   const statusClass = result.status.toLowerCase().replace(/[^a-z0-9-]/g, '');
   const passedSteps = result.steps.filter((step) => step.status === 'passed').length;
@@ -111,7 +176,19 @@ function createHtmlReport(result: WordTestResult, testName: string, sourceFile: 
         <dt>Duration</dt><dd>${result.duration} ms</dd>
         <dt>Test File</dt><dd>${escapeHtml(path.relative(process.cwd(), sourceFile))}</dd>
         <dt>Application URL</dt><dd>${result.applicationUrl ? `<a href="${escapeHtml(result.applicationUrl)}" target="_blank" rel="noreferrer">${escapeHtml(result.applicationUrl)}</a>` : '—'}</dd>
+        <dt>Video</dt><dd>${links.videoHref ? `<a href="${escapeHtml(links.videoHref)}">${escapeHtml(links.videoHref)}</a>` : '—'}</dd>
+        <dt>Trace</dt><dd>${links.traceHref ? `<a href="${escapeHtml(links.traceHref)}">${escapeHtml(links.traceHref)}</a>` : '—'}</dd>
       </dl>${result.error ? `<pre class="error">${escapeHtml(result.error)}</pre>` : ''}</div>
+    </section>
+    <section class="panel">
+      <div class="panel-heading"><h2>Transaction IDs</h2></div>
+      <div class="panel-body">${transactionIdsCell(links.transactionIds)}</div>
+    </section>
+    <section class="panel">
+      <div class="panel-heading"><h2>Environment</h2></div>
+      <div class="panel-body"><dl class="metadata">
+        ${Object.entries(environment).map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('\n        ')}
+      </dl></div>
     </section>
     <section class="panel">
       <div class="panel-heading"><h2>Step Details</h2></div>
@@ -140,14 +217,20 @@ function createHtmlReport(result: WordTestResult, testName: string, sourceFile: 
 </html>`;
 }
 
-function createSummaryHtml(entries: Array<{ result: WordTestResult; testName: string; reportPath: string; sourceFile: string }>): string {
+function createSummaryHtml(entries: SummaryEntry[], environment: Record<string, string>): string {
   const failedStatuses = ['failed', 'timedOut', 'interrupted'];
   const passedCount = entries.filter(({ result }) => result.status === 'passed').length;
   const failedCount = entries.filter(({ result }) => failedStatuses.includes(result.status)).length;
   const skippedCount = entries.filter(({ result }) => result.status === 'skipped').length;
   const totalDuration = entries.reduce((duration, { result }) => duration + result.duration, 0);
+  const passRate = entries.length ? Math.round((passedCount / entries.length) * 100) : 0;
+  const overallStatus = failedCount ? 'failed' : entries.length ? 'passed' : 'skipped';
+  const failingTests = entries.filter(({ result }) => failedStatuses.includes(result.status));
+  const failingList = failingTests.length
+    ? `<ul class="failing-list">${failingTests.map(({ testName, result }) => `<li><strong>${escapeHtml(testName)}</strong>${result.error ? `<span> — ${escapeHtml(result.error.split('\n')[0])}</span>` : ''}</li>`).join('')}</ul>`
+    : '<p class="unavailable">No failing tests.</p>';
   const rows = entries.length
-    ? entries.map(({ result, testName, reportPath, sourceFile }) => {
+    ? entries.map(({ result, testName, reportPath, sourceFile, links }) => {
       const statusClass = result.status.toLowerCase().replace(/[^a-z0-9-]/g, '');
       const href = reportPath.split(path.sep).map(encodeURIComponent).join('/');
       const failedSteps = result.steps.filter((step) => failedStatuses.includes(step.status));
@@ -169,10 +252,12 @@ function createSummaryHtml(entries: Array<{ result: WordTestResult; testName: st
         <td><span class="badge ${escapeHtml(statusClass)}">${escapeHtml(result.status.toUpperCase())}</span></td>
         <td>${result.duration} ms</td>
         <td>${escapeHtml(path.relative(process.cwd(), sourceFile))}</td>
+        <td>${linksCell(links)}</td>
+        <td>${transactionIdsCell(links.transactionIds)}</td>
         <td>${failureEvidence}</td>
       </tr>`;
     }).join('')
-    : '<tr><td colspan="5" class="empty">No tests were recorded.</td></tr>';
+    : '<tr><td colspan="7" class="empty">No tests were recorded.</td></tr>';
 
   return `<!doctype html>
 <html lang="en">
@@ -188,7 +273,7 @@ function createSummaryHtml(entries: Array<{ result: WordTestResult; testName: st
     header h1 { margin: 0; font-size: 22px; }
     header span { color: #c7d9df; font-size: 13px; }
     main { max-width: 1240px; margin: 26px auto; padding: 0 20px; }
-    .metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+    .metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
     .metric, .panel { background: white; border: 1px solid #d9e1e5; border-radius: 5px; }
     .metric { padding: 15px 17px; }
     .metric-label { display: block; color: #586973; font-size: 12px; text-transform: uppercase; }
@@ -213,6 +298,16 @@ function createSummaryHtml(entries: Array<{ result: WordTestResult; testName: st
     details summary { display: inline-block; padding: 6px 9px; border: 1px solid #bdc9cf; border-radius: 4px; color: #12647a; background: #fff; cursor: pointer; font-weight: 600; }
     details img { display: block; width: min(480px, 60vw); height: auto; margin-top: 8px; border: 1px solid #d9e1e5; }
     .empty { padding: 20px; text-align: center; color: #586973; }
+    .failing-list { margin: 0; padding-left: 20px; }
+    .failing-list li { margin: 6px 0; }
+    .failing-list span { color: #812b27; }
+    .metadata { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px 18px; margin: 0; }
+    .metadata dt { color: #586973; font-weight: 600; }
+    .metadata dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+    .panel-body { padding: 18px; }
+    .panel + .panel { margin-top: 18px; }
+    .unavailable { color: #586973; font-style: italic; }
+    .empty { padding: 20px; text-align: center; color: #586973; }
     @media (max-width: 800px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   </style>
 </head>
@@ -220,15 +315,26 @@ function createSummaryHtml(entries: Array<{ result: WordTestResult; testName: st
   <header><h1>Execution Summary</h1><span>Generated ${escapeHtml(new Date().toLocaleString())}</span></header>
   <main>
     <section class="metrics" aria-label="Execution totals">
+      <div class="metric"><span class="metric-label">Overall</span><span class="metric-value"><span class="badge ${escapeHtml(overallStatus)}">${escapeHtml(overallStatus.toUpperCase())}</span></span></div>
       <div class="metric"><span class="metric-label">Tests</span><span class="metric-value">${entries.length}</span></div>
-      <div class="metric"><span class="metric-label">Passed</span><span class="metric-value">${passedCount}</span></div>
-      <div class="metric"><span class="metric-label">Failed</span><span class="metric-value">${failedCount}</span></div>
-      <div class="metric"><span class="metric-label">Skipped</span><span class="metric-value">${skippedCount}</span></div>
+      <div class="metric"><span class="metric-label">Pass Rate</span><span class="metric-value">${passRate}%</span></div>
+      <div class="metric"><span class="metric-label">Passed / Failed / Skipped</span><span class="metric-value">${passedCount} / ${failedCount} / ${skippedCount}</span></div>
       <div class="metric"><span class="metric-label">Total Duration</span><span class="metric-value">${totalDuration} ms</span></div>
+      <div class="metric"><span class="metric-label">Environment</span><span class="metric-value">${escapeHtml(environment['Base URL'] ?? 'Not set')}</span></div>
+    </section>
+    <section class="panel">
+      <div class="panel-heading"><h2>Executive Summary</h2></div>
+      <div class="panel-body">${failingList}</div>
+    </section>
+    <section class="panel">
+      <div class="panel-heading"><h2>Environment Information</h2></div>
+      <div class="panel-body"><dl class="metadata">
+        ${Object.entries(environment).map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('\n        ')}
+      </dl></div>
     </section>
     <section class="panel">
       <div class="panel-heading"><h2>Test Results</h2></div>
-      <div class="table-wrap"><table><thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Test File</th><th>Failure Evidence</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Test</th><th>Status</th><th>Duration</th><th>Test File</th><th>Video / Trace</th><th>Transaction IDs</th><th>Failure Evidence</th></tr></thead><tbody>${rows}</tbody></table></div>
     </section>
   </main>
 </body>
@@ -236,11 +342,29 @@ function createSummaryHtml(entries: Array<{ result: WordTestResult; testName: st
 }
 
 export default class WordReportReporter implements Reporter {
-  private results: Array<{ testId: string; result: WordTestResult; sourceFile: string }> = [];
+  private results: Array<{ testId: string; result: WordTestResult; sourceFile: string; videoPath?: string; tracePath?: string }> = [];
   private pendingResults: Promise<void>[] = [];
+  private environment: Record<string, string> = {};
   private readonly runReportRoot = path.join('DLR_Reports', runFolderName());
 
+  onBegin(config: FullConfig): void {
+    const project = config.projects[0];
+    this.environment = {
+      'Base URL': String(project?.use.baseURL ?? 'Not set'),
+      Projects: config.projects.map((item) => item.name).join(', ') || 'None',
+      Workers: String(config.workers),
+      Retries: String(project?.retries ?? 0),
+      'Operating System': `${os.type()} ${os.release()}`,
+      'Node.js': process.version,
+      Host: os.hostname(),
+    };
+  }
+
   onTestEnd(test: TestCase, result: TestResult): void {
+    const video = result.attachments.find((attachment) => attachment.contentType === 'video/webm' && attachment.path);
+    if (video) {
+      video.name = test.title;
+    }
     this.pendingResults.push(this.collectResult(test, result));
   }
 
@@ -278,9 +402,13 @@ export default class WordReportReporter implements Reporter {
     }
 
     const testData = await readTestData(test.title).catch(() => undefined);
+    const videoPath = result.attachments.find((attachment) => attachment.contentType === 'video/webm' && attachment.path)?.path;
+    const tracePath = result.attachments.find((attachment) => attachment.name === 'trace' && attachment.path)?.path;
 
     this.results.push({
       testId: test.id,
+      videoPath,
+      tracePath,
       result: {
         title: test.titlePath().filter((part) => part.trim().length > 0).join(' > '),
         status: result.status,
@@ -293,6 +421,16 @@ export default class WordReportReporter implements Reporter {
       },
       sourceFile: test.location.file,
     });
+  }
+
+  async onExit(): Promise<void> {
+    const indexPath = path.resolve(process.cwd(), 'playwright-report', 'index.html');
+    const html = await fs.readFile(indexPath, 'utf8').catch(() => undefined);
+    if (!html || html.includes(BUILT_IN_THEME_MARKER)) return;
+    const themed = html
+      .replace(/<title>[^<]*<\/title>/, '<title>htmlReports</title>')
+      .replace('</head>', `${BUILT_IN_THEME_MARKER}<style>${BUILT_IN_THEME_CSS}</style></head>`);
+    await fs.writeFile(indexPath, themed, 'utf8');
   }
 
   async onEnd(_result: FullResult): Promise<void> {
@@ -313,8 +451,9 @@ export default class WordReportReporter implements Reporter {
     }
 
     const usedPaths = new Set<string>();
-    const summaryEntries: Array<{ result: WordTestResult; testName: string; reportPath: string; sourceFile: string }> = [];
-    for (const { result, sourceFile } of finalResults) {
+    const usedArtifactNames = new Set<string>();
+    const summaryEntries: SummaryEntry[] = [];
+    for (const { result, sourceFile, videoPath, tracePath } of finalResults) {
       const relativeSourceFile = path.relative(process.cwd(), sourceFile);
       const outputDirectory = path.join(this.runReportRoot, path.dirname(relativeSourceFile));
       const testName = result.title.split(' > ').pop()?.trim() || path.basename(sourceFile, path.extname(sourceFile));
@@ -330,14 +469,42 @@ export default class WordReportReporter implements Reporter {
       }
       usedPaths.add(reportBasePath.toLowerCase());
       await fs.mkdir(outputDirectory, { recursive: true });
+
+      let artifactName = safeTestName;
+      let artifactSuffix = 2;
+      while (usedArtifactNames.has(artifactName.toLowerCase())) {
+        artifactName = `${safeTestName}_${artifactSuffix++}`;
+      }
+      usedArtifactNames.add(artifactName.toLowerCase());
+      const videoTarget = `${reportBasePath}.webm`;
+      const traceTarget = path.join(this.runReportRoot, 'traces', `${artifactName}.zip`);
+      if (videoPath) {
+        await fs.copyFile(videoPath, videoTarget);
+      }
+      if (tracePath) {
+        await fs.mkdir(path.dirname(traceTarget), { recursive: true });
+        await fs.copyFile(tracePath, traceTarget);
+      }
+      const transactionIds = extractTransactionIds(result.steps);
+      const pageLinks: TestReportLinks = {
+        transactionIds,
+        videoHref: videoPath ? relativeHref(outputDirectory, videoTarget) : undefined,
+        traceHref: tracePath ? relativeHref(outputDirectory, traceTarget) : undefined,
+      };
+      const summaryLinks: TestReportLinks = {
+        transactionIds,
+        videoHref: videoPath ? relativeHref(this.runReportRoot, videoTarget) : undefined,
+        traceHref: tracePath ? relativeHref(this.runReportRoot, traceTarget) : undefined,
+      };
+
       const htmlReportPath = `${reportBasePath}.html`;
-      await fs.writeFile(htmlReportPath, createHtmlReport(result, testName, sourceFile), 'utf8');
+      await fs.writeFile(htmlReportPath, createHtmlReport(result, testName, sourceFile, pageLinks, this.environment), 'utf8');
       await reportUtil.generateReport([result], `${reportBasePath}.docx`);
-      summaryEntries.push({ result, testName, reportPath: path.relative(this.runReportRoot, htmlReportPath), sourceFile });
+      summaryEntries.push({ result, testName, reportPath: path.relative(this.runReportRoot, htmlReportPath), sourceFile, links: summaryLinks });
     }
 
     await fs.mkdir(this.runReportRoot, { recursive: true });
-    await fs.writeFile(path.join(this.runReportRoot, 'SummayReport.html'), createSummaryHtml(summaryEntries), 'utf8');
+    await fs.writeFile(path.join(this.runReportRoot, 'SummayReport.html'), createSummaryHtml(summaryEntries, this.environment), 'utf8');
   }
 }
 

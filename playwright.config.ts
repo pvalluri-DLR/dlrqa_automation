@@ -4,7 +4,7 @@ export default defineConfig({
 	timeout: 3 * 60 * 60 * 1000,
 	fullyParallel: true,
 	workers: 2,
-	reporter: [['list'], ['html', { open: 'never' }], ['./utils/WordReportReporter.ts']],
+	reporter: [['list'], ['./utils/WordReportReporter.ts'], ['html', { open: 'never' }]],
 	use: {
 		headless: false,
 		viewport: null,

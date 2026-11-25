@@ -39,6 +39,15 @@ export class OpportunityPage {
 		await this.playwright.waitForTimeout(20000);
 	}
 
+	async searchAndSelectAccount(accountName: string): Promise<void> {
+		await this.playwright.waitForPageLoad();
+		await this.playwright.click(this.page.locator("xpath=//div[@class='slds-global-header__item slds-global-header__item_search']//button").filter({ visible: true }).first());
+		await this.page.keyboard.type(accountName, { delay: 100 });
+		await this.playwright.waitForPageLoad();
+		await this.playwright.click(this.page.getByRole('option').filter({ has: this.page.getByText(accountName, { exact: true }) }).filter({ visible: true }).first());
+		await this.playwright.waitForPageLoad();
+	}
+
 	async selectProperty(propertyName: string): Promise<void> {
 		await this.playwright.click(this.page.getByRole('button', { name: 'Edit Property' }).filter({ visible: true }).first());
 		await this.playwright.typeCharacterByCharacter(this.page.getByLabel(/^Property/).filter({ visible: true }).first(), propertyName);
@@ -183,16 +192,16 @@ export class OpportunityPage {
         await this.playwright.click(returnToOpportunityButton);
     }
 
-	async clickNewDeployment(): Promise<void> {
-        await this.playwright.waitForPageLoad();
-        const innerFrame = await this.switchToCanvasInnerFrame();
-        const newDeploymentButton = innerFrame
-            .locator("xpath=//span[text()='New Deployment']")
-            .filter({ visible: true })
-            .first();
-        await newDeploymentButton.waitFor({ state: 'visible', timeout: 60000 });
-        await this.playwright.click(newDeploymentButton);
-    }
+	// async clickNewDeployment(): Promise<void> {
+    //     await this.playwright.waitForPageLoad();
+    //     const innerFrame = await this.switchToCanvasInnerFrame();
+    //     const newDeploymentButton = innerFrame
+    //         .locator("xpath=//span[text()='New Deployment']")
+    //         .filter({ visible: true })
+    //         .first();
+    //     await newDeploymentButton.waitFor({ state: 'visible', timeout: 60000 });
+    //     await this.playwright.click(newDeploymentButton);
+    // }
 
 	async verifyQuoteGenerated(): Promise<string> {
 		await this.playwright.waitForTimeout(40000);
@@ -231,16 +240,20 @@ export class OpportunityPage {
         await this.playwright.waitForPageLoad();
     }
 
-	async selectSuite(suite: string): Promise<void> {
-        await this.playwright.waitForPageLoad();
-        const suiteSelectionInput = this.page.locator("xpath=//input[@type='text' and contains(@id, 'suite_selector')]").filter({ visible: true }).first();
-        const suiteOption = this.page.locator(`xpath=//*[@id='oj-listbox-results-suite_selector_pF-combobox']/li[*[@aria-label='${suite}']]`).filter({ visible: true }).first();
-        await suiteSelectionInput.waitFor({ state: 'visible', timeout: 60000 });
-        await this.playwright.click(suiteSelectionInput);
-        await suiteSelectionInput.fill(suite);
-        await suiteOption.waitFor({ state: 'visible', timeout: 30000 });
-        await this.playwright.click(suiteOption);
-    }
+	// async selectSuite(suite: string): Promise<void> {
+    //     await this.playwright.waitForTimeout(20000);
+    //      const innerFrame = await this.switchToCanvasInnerFrame();
+    //     await this.playwright.waitForPageLoad();
+    //     const suiteSelectionInput = innerFrame.locator("xpath=//input[@type='text' and contains(@id, 'suite_selector')]").filter({ visible: true }).first();
+    //     const suiteOption = innerFrame.locator(`xpath=//*[@id='oj-listbox-results-suite_selector_pF-combobox']/li[*[@aria-label='${suite}']]`).filter({ visible: true }).first();
+    //     await suiteSelectionInput.waitFor({ state: 'visible', timeout: 60000 });
+    //     await this.playwright.click(suiteSelectionInput);
+    //     await suiteSelectionInput.fill(suite);
+    //     await suiteOption.waitFor({ state: 'visible', timeout: 30000 });
+    //     await this.playwright.click(suiteOption);
+    //     await this.playwright.waitForPageLoad();
+    //     await this.playwright.waitForTimeout(20000);
+    // }
 
 	async verifyDraftQuoteAndGetCpqNumber(): Promise<string> {
         const status = this.page.getByLabel('Quote Status', { exact: true });
